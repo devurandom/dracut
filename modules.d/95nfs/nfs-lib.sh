@@ -3,6 +3,7 @@
 # ex: ts=8 sw=4 sts=4 et filetype=sh
 
 type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
+type det_fs >/dev/null 2>&1 || . /lib/fs-lib.sh
 . /lib/net-lib.sh
 
 # TODO: make these things not pollute the calling namespace
@@ -137,4 +138,58 @@ mount_nfs() {
         options=$options,nolock
     fi
     mount -t $nfs -o$options $server:$path $mntdir
+}
+
+mangle_nfs_options() {
+	local IFS=, options="$1" nfsrw nfslock
+
+	for f in ${options} ; do
+		case $f in
+			ro|rw) nfsrw="${f}" ;;
+			lock|nolock) nfslock="${f}" ;;
+			*) nfsoptions="${nfsoptions}${nfsoptions+,}${f}" ;;
+		esac
+	done
+
+	# Override rw/ro if set on cmdline
+	getarg ro >/dev/null && nfsrw=ro
+	getarg rw >/dev/null && nfsrw=rw
+
+	nfsoptions="${nfsoptions}${nfsoptions+${nfsrw+,}}${nfsrw}"
+
+	if [ "${nfs}" = nfs4 ]; then
+		nfsoptions="${nfsoptions}${nfsoptions+${nfslock+,}}${nfslock}"
+	else
+		[ "${nfslock}" = lock ] \
+			&& warn "Locks unsupported on NFSv{2,3}, using nolock" 1>&2
+		nfsoptions="${nfsoptions}${nfsoptions+,}nolock"
+	fi
+}
+
+nfs_add_early_mount() {
+	local mountpoint fstype fs options nfsroot nfs server path nfsoptions
+
+	fs_mount_to_var "$1"
+	[ "${fstype}" = nfs ] || [ "${fstype}" = nfs4 ] || return 1
+
+	nfsroot="${fstype}:${fs}${options+,}${options}"
+	nfsroot_to_var "${nfsroot}"
+	[ "$path" = "error" ] && die "Argument rd.mount=*:nfs: must contain a valid path!"
+	[ -z "$server" ] && die "Argument rd.mount=*:nfs: must contain a valid server!"
+
+	# Mount might default to nfs4 for fstype=nfs, force it to the right version instead
+	case "${nfs}" in
+		nfs) options="${options}${options+,}vers=3" ;;
+		nfs4) options="${options}${options+,}vers=4" ;;
+	esac
+
+	mangle_nfs_options "${options}"
+
+	echo "Adding early mount of ${nfs}:${server}:${path} to ${mountpoint}"
+	fs_add_mount early "${server}:${path}" "${mountpoint}" "${nfs}" "${nfsoptions}" 0 0
+
+	cat <<- EOF > "${hookdir}"/initqueue/finished/nfs-reachable-"${server}".sh
+		echo "Probing ${server} ..."
+		ping -q -c1 -w1 "${server}"
+	EOF
 }
