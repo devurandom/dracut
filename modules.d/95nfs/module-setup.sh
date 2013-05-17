@@ -22,6 +22,8 @@ check() {
 depends() {
     # We depend on network modules being loaded
     echo network
+    # We use add_early_mount to mount in locations different from rootfs
+    echo fs-lib
 }
 
 installkernel() {
@@ -73,4 +75,3 @@ install() {
         && chown rpc.rpc "$initdir/var/lib/rpcbind"
     dracut_need_initqueue
 }
-

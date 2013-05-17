@@ -26,6 +26,15 @@
 #
 
 type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
+type det_fs >/dev/null 2>&1 || . /lib/fs-lib.sh
+type net_add_parse_vars >/dev/null 2>&1 || . /lib/net-lib.sh
+
+for m in $(getargs rd.mount.early) ; do
+	fs_mount_to_var "$m"
+	[ "${fstype}" = nfs ] || [ "${fstype}" = nfs4 ] || continue
+	unset mountpoint fstype fs options
+	net_add_parse_vars "$m" nfs-lib nfs_add_early_mount
+done
 
 #Don't continue if root is ok
 [ -n "$rootok" ] && return
